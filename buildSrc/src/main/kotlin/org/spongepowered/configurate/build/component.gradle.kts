@@ -33,7 +33,10 @@ tasks.register("resolveAllForLocking") {
     }
     doLast {
         configurations
-            .filter { it.isCanBeResolved && (it.resolutionStrategy as ResolutionStrategyInternal).isDependencyLockingEnabled }
+            .filter {
+                (it.isCanBeResolved || "ktlint" in it.name) && // workaround because ktlint is bad
+                    (it.resolutionStrategy as ResolutionStrategyInternal).isDependencyLockingEnabled
+            }
             .forEach { it.resolve() }
     }
 }

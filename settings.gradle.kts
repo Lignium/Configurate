@@ -38,7 +38,7 @@ listOf("gson", "hocon", "jackson", "xml", "yaml").forEach {
 }
 
 // extras
-listOf("kotlin", "guice", "dfu2", "dfu3", "dfu4").forEach {
+listOf("kotlin", "groovy", "guice", "dfu2", "dfu3", "dfu4").forEach {
     include(":extra:$it")
     findProject(":extra:$it")?.name = "extra-$it"
 }
