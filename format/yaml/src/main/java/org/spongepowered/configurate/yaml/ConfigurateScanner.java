@@ -23,11 +23,11 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.comments.CommentType;
 import org.yaml.snakeyaml.error.Mark;
 import org.yaml.snakeyaml.error.YAMLException;
 import org.yaml.snakeyaml.reader.StreamReader;
@@ -42,6 +42,7 @@ import org.yaml.snakeyaml.tokens.BlockEndToken;
 import org.yaml.snakeyaml.tokens.BlockEntryToken;
 import org.yaml.snakeyaml.tokens.BlockMappingStartToken;
 import org.yaml.snakeyaml.tokens.BlockSequenceStartToken;
+import org.yaml.snakeyaml.tokens.CommentToken;
 import org.yaml.snakeyaml.tokens.DirectiveToken;
 import org.yaml.snakeyaml.tokens.DocumentEndToken;
 import org.yaml.snakeyaml.tokens.DocumentStartToken;
@@ -88,6 +89,7 @@ import org.yaml.snakeyaml.util.UriEncoder;
  * Scanner produces tokens of the following types:
  * STREAM-START
  * STREAM-END
+ * COMMENT
  * DIRECTIVE(name, value)
  * DOCUMENT-START
  * DOCUMENT-END
@@ -204,6 +206,9 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
     // Past indentation levels.
     private ArrayStack<Integer> indents;
 
+    // A flag that indicates if comments should be emitted
+    private boolean emitComments;
+
     // Variables related to simple keys treatment. See PyYAML.
 
     /**
@@ -239,53 +244,28 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
      */
     private Map<Integer, SimpleKey> possibleSimpleKeys;
 
-    // Configurate start -- comment capture
-    private boolean captureComments = true;
-    private final StringBuilder comments = new StringBuilder();
-
-    public String popComments() {
-        if (this.comments.length() == 0) {
-            return null;
-        } else {
-            final String ret = this.comments.toString();
-            this.comments.delete(0, Integer.MAX_VALUE);
-            return ret;
-        }
-    }
-
-    private void pushComment(int length) {
-        if (!this.captureComments) {
-            this.reader.forward(length);
-            return;
-        }
-
-        if (this.comments.length() > 0) {
-            this.comments.append(org.spongepowered.configurate.loader.AbstractConfigurationLoader.CONFIGURATE_LINE_SEPARATOR);
-        }
-        final String comment = this.reader.prefixForward(length);
-        if (comment.startsWith(" ")) {
-            this.comments.append(comment, 1, comment.length());
-        } else {
-            this.comments.append(comment);
-        }
-    }
-
-    void setCaptureComments(boolean capture) {
-        this.captureComments = capture;
-        if (!capture && this.comments.length() > 0) {
-            this.comments.delete(0, Integer.MAX_VALUE);
-        }
-    }
-
-    // Configurate end -- comment capture
-
-    public ConfigurateScanner(StreamReader reader) { // Configurate: rename
+    public ConfigurateScanner(StreamReader reader) {
+        this.emitComments = false;
         this.reader = reader;
         this.tokens = new ArrayList<Token>(100);
         this.indents = new ArrayStack<Integer>(10);
         // The order in possibleSimpleKeys is kept for nextPossibleSimpleKey()
         this.possibleSimpleKeys = new LinkedHashMap<Integer, SimpleKey>();
         fetchStreamStart();// Add the STREAM-START token.
+    }
+
+    /**
+     * Set the scanner to ignore comments or emit them as a <code>CommentToken<code>.
+     *
+     * @param emitComments <code>true</code> to emit; <code>false</code> to ignore</code>
+     */
+    public ConfigurateScanner setEmitComments(boolean emitComments) {
+        this.emitComments = emitComments;
+        return this;
+    }
+
+    public boolean isEmitComments() {
+        return emitComments;
     }
 
     /**
@@ -352,7 +332,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
      * Fetch one or more tokens from the StreamReader.
      */
     private void fetchMoreTokens() {
-        // Eat whitespaces and comments until we reach the next token.
+        // Eat whitespaces and process comments until we reach the next token.
         scanToNextToken();
         // Remove obsolete possible simple keys.
         stalePossibleSimpleKeys();
@@ -363,105 +343,105 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         // will look like.
         int c = reader.peek();
         switch (c) {
-        case '\0':
-            // Is it the end of stream?
-            fetchStreamEnd();
-            return;
-        case '%':
-            // Is it a directive?
-            if (checkDirective()) {
-                fetchDirective();
+            case '\0':
+                // Is it the end of stream?
+                fetchStreamEnd();
                 return;
-            }
-            break;
-        case '-':
-            // Is it the document start?
-            if (checkDocumentStart()) {
-                fetchDocumentStart();
+            case '%':
+                // Is it a directive?
+                if (checkDirective()) {
+                    fetchDirective();
+                    return;
+                }
+                break;
+            case '-':
+                // Is it the document start?
+                if (checkDocumentStart()) {
+                    fetchDocumentStart();
+                    return;
+                    // Is it the block entry indicator?
+                } else if (checkBlockEntry()) {
+                    fetchBlockEntry();
+                    return;
+                }
+                break;
+            case '.':
+                // Is it the document end?
+                if (checkDocumentEnd()) {
+                    fetchDocumentEnd();
+                    return;
+                }
+                break;
+            // TODO support for BOM within a stream. (not implemented in PyYAML)
+            case '[':
+                // Is it the flow sequence start indicator?
+                fetchFlowSequenceStart();
                 return;
-                // Is it the block entry indicator?
-            } else if (checkBlockEntry()) {
-                fetchBlockEntry();
+            case '{':
+                // Is it the flow mapping start indicator?
+                fetchFlowMappingStart();
                 return;
-            }
-            break;
-        case '.':
-            // Is it the document end?
-            if (checkDocumentEnd()) {
-                fetchDocumentEnd();
+            case ']':
+                // Is it the flow sequence end indicator?
+                fetchFlowSequenceEnd();
                 return;
-            }
-            break;
-        // TODO support for BOM within a stream. (not implemented in PyYAML)
-        case '[':
-            // Is it the flow sequence start indicator?
-            fetchFlowSequenceStart();
-            return;
-        case '{':
-            // Is it the flow mapping start indicator?
-            fetchFlowMappingStart();
-            return;
-        case ']':
-            // Is it the flow sequence end indicator?
-            fetchFlowSequenceEnd();
-            return;
-        case '}':
-            // Is it the flow mapping end indicator?
-            fetchFlowMappingEnd();
-            return;
-        case ',':
-            // Is it the flow entry indicator?
-            fetchFlowEntry();
-            return;
+            case '}':
+                // Is it the flow mapping end indicator?
+                fetchFlowMappingEnd();
+                return;
+            case ',':
+                // Is it the flow entry indicator?
+                fetchFlowEntry();
+                return;
             // see block entry indicator above
-        case '?':
-            // Is it the key indicator?
-            if (checkKey()) {
-                fetchKey();
+            case '?':
+                // Is it the key indicator?
+                if (checkKey()) {
+                    fetchKey();
+                    return;
+                }
+                break;
+            case ':':
+                // Is it the value indicator?
+                if (checkValue()) {
+                    fetchValue();
+                    return;
+                }
+                break;
+            case '*':
+                // Is it an alias?
+                fetchAlias();
                 return;
-            }
-            break;
-        case ':':
-            // Is it the value indicator?
-            if (checkValue()) {
-                fetchValue();
+            case '&':
+                // Is it an anchor?
+                fetchAnchor();
                 return;
-            }
-            break;
-        case '*':
-            // Is it an alias?
-            fetchAlias();
-            return;
-        case '&':
-            // Is it an anchor?
-            fetchAnchor();
-            return;
-        case '!':
-            // Is it a tag?
-            fetchTag();
-            return;
-        case '|':
-            // Is it a literal scalar?
-            if (this.flowLevel == 0) {
-                fetchLiteral();
+            case '!':
+                // Is it a tag?
+                fetchTag();
                 return;
-            }
-            break;
-        case '>':
-            // Is it a folded scalar?
-            if (this.flowLevel == 0) {
-                fetchFolded();
+            case '|':
+                // Is it a literal scalar?
+                if (this.flowLevel == 0) {
+                    fetchLiteral();
+                    return;
+                }
+                break;
+            case '>':
+                // Is it a folded scalar?
+                if (this.flowLevel == 0) {
+                    fetchFolded();
+                    return;
+                }
+                break;
+            case '\'':
+                // Is it a single quoted scalar?
+                fetchSingle();
                 return;
-            }
-            break;
-        case '\'':
-            // Is it a single quoted scalar?
-            fetchSingle();
-            return;
-        case '"':
-            // Is it a double quoted scalar?
-            fetchDouble();
-            return;
+            case '"':
+                // Is it a double quoted scalar?
+                fetchDouble();
+                return;
         }
         // It must be a plain scalar then.
         if (checkPlain()) {
@@ -482,10 +462,10 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (c == '\t')
             chRepresentation += "(TAB)";
         String text = String // Configurate: explicitly specify locale
-                .format(Locale.ROOT, "found character '%s' that cannot start any token. (Do not use %s for indentation)",
-                        chRepresentation, chRepresentation);
+            .format(java.util.Locale.ROOT, "found character '%s' that cannot start any token. (Do not use %s for indentation)",
+                chRepresentation, chRepresentation);
         throw new ScannerException("while scanning for the next token", null, text,
-                reader.getMark());
+            reader.getMark());
     }
 
     // Simple keys treatment.
@@ -518,10 +498,10 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
     private void stalePossibleSimpleKeys() {
         if (!this.possibleSimpleKeys.isEmpty()) {
             for (Iterator<SimpleKey> iterator = this.possibleSimpleKeys.values().iterator(); iterator
-                    .hasNext();) {
+                .hasNext();) {
                 SimpleKey key = iterator.next();
                 if ((key.getLine() != reader.getLine())
-                        || (reader.getIndex() - key.getIndex() > 1024)) {
+                    || (reader.getIndex() - key.getIndex() > 1024)) {
                     // If the key is not on the same line as the current
                     // position OR the difference in column between the token
                     // start and the current position is more than the maximum
@@ -530,7 +510,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                         // If the key was required, this implies an error
                         // condition.
                         throw new ScannerException("while scanning a simple key", key.getMark(),
-                                "could not find expected ':'", reader.getMark());
+                            "could not find expected ':'", reader.getMark());
                     }
                     iterator.remove();
                 }
@@ -558,7 +538,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             // current line. Therefore it is always allowed.
         } else {
             throw new YAMLException(
-                    "A simple key is required only if it is the first token in the current line");
+                "A simple key is required only if it is the first token in the current line");
         }
 
         // The next token might be a simple key. Let's save it's number and
@@ -567,7 +547,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             removePossibleSimpleKey();
             int tokenNumber = this.tokensTaken + this.tokens.size();
             SimpleKey key = new SimpleKey(tokenNumber, required, reader.getIndex(),
-                    reader.getLine(), this.reader.getColumn(), this.reader.getMark());
+                reader.getLine(), this.reader.getColumn(), this.reader.getMark());
             this.possibleSimpleKeys.put(this.flowLevel, key);
         }
     }
@@ -579,7 +559,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         SimpleKey key = possibleSimpleKeys.remove(flowLevel);
         if (key != null && key.isRequired()) {
             throw new ScannerException("while scanning a simple key", key.getMark(),
-                    "could not find expected ':'", reader.getMark());
+                "could not find expected ':'", reader.getMark());
         }
     }
 
@@ -683,8 +663,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         this.allowSimpleKey = false;
 
         // Scan and add DIRECTIVE.
-        Token tok = scanDirective();
-        this.tokens.add(tok);
+        List<Token> tok = scanDirective();
+        this.tokens.addAll(tok);
     }
 
     /**
@@ -843,7 +823,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             // Are we allowed to start a new entry?
             if (!this.allowSimpleKey) {
                 throw new ScannerException(null, null, "sequence entries are not allowed here",
-                        reader.getMark());
+                    reader.getMark());
             }
 
             // We may need to add BLOCK-SEQUENCE-START.
@@ -880,7 +860,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             // Are we allowed to start a key (not necessary a simple)?
             if (!this.allowSimpleKey) {
                 throw new ScannerException(null, null, "mapping keys are not allowed here",
-                        reader.getMark());
+                    reader.getMark());
             }
             // We may need to add BLOCK-MAPPING-START.
             if (addIndent(this.reader.getColumn())) {
@@ -913,14 +893,14 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (key != null) {
             // Add KEY.
             this.tokens.add(key.getTokenNumber() - this.tokensTaken, new KeyToken(key.getMark(),
-                    key.getMark()));
+                key.getMark()));
 
             // If this key starts a new block mapping, we need to add
             // BLOCK-MAPPING-START.
             if (this.flowLevel == 0) {
                 if (addIndent(key.getColumn())) {
                     this.tokens.add(key.getTokenNumber() - this.tokensTaken,
-                            new BlockMappingStartToken(key.getMark(), key.getMark()));
+                        new BlockMappingStartToken(key.getMark(), key.getMark()));
                 }
             }
             // There cannot be two simple keys one after another.
@@ -936,7 +916,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 // start a simple key.
                 if (!this.allowSimpleKey) {
                     throw new ScannerException(null, null, "mapping values are not allowed here",
-                            reader.getMark());
+                        reader.getMark());
                 }
             }
 
@@ -1060,8 +1040,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         removePossibleSimpleKey();
 
         // Scan and add SCALAR.
-        Token tok = scanBlockScalar(style);
-        this.tokens.add(tok);
+        List<Token> tok = scanBlockScalar(style);
+        this.tokens.addAll(tok);
     }
 
     /**
@@ -1213,8 +1193,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         // If the next char is NOT one of the forbidden chars above or
         // whitespace, then this is the start of a plain scalar.
         return Constant.NULL_BL_T_LINEBR.hasNo(c, "-?:,[]{}#&*!|>\'\"%@`")
-                || (Constant.NULL_BL_T_LINEBR.hasNo(reader.peek(1)) && (c == '-' || (this.flowLevel == 0 && "?:"
-                        .indexOf(c) != -1)));
+            || (Constant.NULL_BL_T_LINEBR.hasNo(reader.peek(1)) && (c == '-' || (this.flowLevel == 0 && "?:"
+            .indexOf(c) != -1)));
     }
 
     // Scanners.
@@ -1247,7 +1227,10 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             reader.forward();
         }
         boolean found = false;
+        int inlineStartColumn = -1;
         while (!found) {
+            Mark startMark = reader.getMark();
+            boolean commentSeen = false;
             int ff = 0;
             // Peek ahead until we find the first non-space character, then
             // move forward directly to that character.
@@ -1262,18 +1245,32 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             // comments are from a # to the next new-line. We then forward
             // past the comment.
             if (reader.peek() == '#') {
-                ff = 0;
-                reader.forward(); // skip comment character
-                while (Constant.NULL_OR_LINEBR.hasNo(reader.peek(ff))) {
-                    ff++;
+                commentSeen = true;
+                CommentType type;
+                if(startMark.getColumn() != 0) {
+                    type = CommentType.IN_LINE;
+                    inlineStartColumn = reader.getColumn();
+                } else if(inlineStartColumn == reader.getColumn()) {
+                    type = CommentType.IN_LINE;
+                } else {
+                    inlineStartColumn = -1;
+                    type = CommentType.BLOCK;
                 }
-                if (ff > 0) {
-                    this.pushComment(ff); // Configurate: capture comment
+                CommentToken token = scanComment(type);
+                if (emitComments) {
+                    this.tokens.add(token);
                 }
             }
             // If we scanned a line break, then (depending on flow level),
             // simple keys may be allowed.
-            if (scanLineBreak().length() != 0) {// found a line-break
+            String breaks = scanLineBreak();
+            if (breaks.length() != 0) {// found a line-break
+                if (emitComments && ! commentSeen) {
+                    if (startMark.getColumn() == 0) {
+                        Mark endMark = reader.getMark();
+                        this.tokens.add(new CommentToken(CommentType.BLANK_LINE, breaks, startMark, endMark));
+                    }
+                }
                 if (this.flowLevel == 0) {
                     // Simple keys are allowed at flow-level 0 after a line
                     // break
@@ -1285,8 +1282,21 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         }
     }
 
+    private CommentToken scanComment(CommentType type) {
+        // See the specification for details.
+        Mark startMark = reader.getMark();
+        reader.forward();
+        int length = 0;
+        while (Constant.NULL_OR_LINEBR.hasNo(reader.peek(length))) {
+            length++;
+        }
+        String value = reader.prefixForward(length);
+        Mark endMark = reader.getMark();
+        return new CommentToken(type, value, startMark, endMark);
+    }
+
     @SuppressWarnings({ "unchecked", "rawtypes" })
-    private Token scanDirective() {
+    private List<Token> scanDirective() {
         // See the specification for details.
         Mark startMark = reader.getMark();
         Mark endMark;
@@ -1309,8 +1319,9 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 reader.forward(ff);
             }
         }
-        scanDirectiveIgnoredLine(startMark);
-        return new DirectiveToken(name, value, startMark, endMark);
+        CommentToken commentToken = scanDirectiveIgnoredLine(startMark);
+        DirectiveToken token = new DirectiveToken(name, value, startMark, endMark);
+        return makeTokenList(token, commentToken);
     }
 
     /**
@@ -1334,16 +1345,16 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (length == 0) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected alphabetic or numeric character, but found " + s + "(" + c
-                            + ")", reader.getMark());
+                "expected alphabetic or numeric character, but found " + s + "(" + c
+                    + ")", reader.getMark());
         }
         String value = reader.prefixForward(length);
         c = reader.peek();
         if (Constant.NULL_BL_LINEBR.hasNo(c)) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected alphabetic or numeric character, but found " + s + "(" + c
-                            + ")", reader.getMark());
+                "expected alphabetic or numeric character, but found " + s + "(" + c
+                    + ")", reader.getMark());
         }
         return value;
     }
@@ -1358,8 +1369,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (c != '.') {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected a digit or '.', but found " + s + "("
-                            + c + ")", reader.getMark());
+                "expected a digit or '.', but found " + s + "("
+                    + c + ")", reader.getMark());
         }
         reader.forward();
         Integer minor = scanYamlDirectiveNumber(startMark);
@@ -1367,8 +1378,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (Constant.NULL_BL_LINEBR.hasNo(c)) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected a digit or ' ', but found " + s + "("
-                            + c + ")", reader.getMark());
+                "expected a digit or ' ', but found " + s + "("
+                    + c + ")", reader.getMark());
         }
         List<Integer> result = new ArrayList<Integer>(2);
         result.add(major);
@@ -1389,7 +1400,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (!Character.isDigit(c)) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected a digit, but found " + s + "(" + (c) + ")", reader.getMark());
+                "expected a digit, but found " + s + "(" + (c) + ")", reader.getMark());
         }
         int length = 0;
         while (Character.isDigit(reader.peek(length))) {
@@ -1441,7 +1452,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (c != ' ') {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected ' ', but found " + s + "(" + c + ")", reader.getMark());
+                "expected ' ', but found " + s + "(" + c + ")", reader.getMark());
         }
         return value;
     }
@@ -1458,37 +1469,49 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (Constant.NULL_BL_LINEBR.hasNo(c)) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected ' ', but found " + s + "(" + c + ")",
-                    reader.getMark());
+                "expected ' ', but found " + s + "(" + c + ")",
+                reader.getMark());
         }
         return value;
     }
 
-    private void scanDirectiveIgnoredLine(Mark startMark) {
+    private CommentToken scanDirectiveIgnoredLine(Mark startMark) {
         // See the specification for details.
         while (reader.peek() == ' ') {
             reader.forward();
         }
+        CommentToken commentToken = null;
         if (reader.peek() == '#') {
-            // Configurate start -- comments
-            reader.forward(); // skip '#'
-            int ff = 0;
-            while (Constant.NULL_OR_LINEBR.hasNo(reader.peek())) {
-                ff++;
+            Mark commentStartMark = reader.getMark();
+            int length = 0;
+            while (Constant.NULL_OR_LINEBR.hasNo(reader.peek(length))) {
+                length++;
             }
-            if (ff > 0) pushComment(ff);
-            // Configurate end
+            String comment = reader.prefixForward(length);
+            if(emitComments) {
+                Mark commentEndMark = reader.getMark();
+                commentToken = new CommentToken(CommentType.IN_LINE, comment, commentStartMark, commentEndMark);
+            }
         }
         int c = reader.peek();
         String lineBreak = scanLineBreak();
         if (lineBreak.length() == 0 && c != '\0') {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a directive", startMark,
-                    "expected a comment or a line break, but found " + s + "(" + c + ")",
-                    reader.getMark());
+                "expected a comment or a line break, but found " + s + "(" + c + ")",
+                reader.getMark());
         }
+        return commentToken;
     }
 
+    /**
+     * <pre>
+     * The YAML 1.1 specification does not restrict characters for anchors and
+     * aliases. This may lead to problems.
+     * see https://bitbucket.org/asomov/snakeyaml/issues/485/alias-names-are-too-permissive-compared-to
+     * This implementation tries to follow https://github.com/yaml/yaml-spec/blob/master/rfc/RFC-0003.md
+     * </pre>
+     */
     private Token scanAnchor(boolean isAnchor) {
         Mark startMark = reader.getMark();
         int indicator = reader.peek();
@@ -1496,23 +1519,21 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         reader.forward();
         int length = 0;
         int c = reader.peek(length);
-        // YAML 1.1 is unclear for the anchor names, we apply YAML 1.2 rules for the names.
-        // Anchor may not contain ",[]{}", the ":" was added by SnakeYAML -> should it be added to the spec 1.2 ?
-        while (Constant.NULL_BL_T_LINEBR.hasNo(c, ":,[]{}")) {
+        while (Constant.NULL_BL_T_LINEBR.hasNo(c, ":,[]{}/.*&")) {
             length++;
             c = reader.peek(length);
         }
         if (length == 0) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning an " + name, startMark,
-                    "unexpected character found " + s + "(" + c + ")", reader.getMark());
+                "unexpected character found " + s + "(" + c + ")", reader.getMark());
         }
         String value = reader.prefixForward(length);
         c = reader.peek();
         if (Constant.NULL_BL_T_LINEBR.hasNo(c, "?:,]}%@`")) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning an " + name, startMark,
-                    "unexpected character found " + s + "(" + c + ")", reader.getMark());
+                "unexpected character found " + s + "(" + c + ")", reader.getMark());
         }
         Mark endMark = reader.getMark();
         Token tok;
@@ -1577,8 +1598,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 // URI and the closing &gt;, then an error has occurred.
                 final String s = String.valueOf(Character.toChars(c));
                 throw new ScannerException("while scanning a tag", startMark,
-                        "expected '>', but found '" + s + "' (" + c
-                                + ")", reader.getMark());
+                    "expected '>', but found '" + s + "' (" + c
+                        + ")", reader.getMark());
             }
             reader.forward();
         } else if (Constant.NULL_BL_T_LINEBR.has(c)) {
@@ -1617,14 +1638,14 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (Constant.NULL_BL_LINEBR.hasNo(c)) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a tag", startMark,
-                    "expected ' ', but found '" + s + "' (" + (c) + ")", reader.getMark());
+                "expected ' ', but found '" + s + "' (" + (c) + ")", reader.getMark());
         }
         TagTuple value = new TagTuple(handle, suffix);
         Mark endMark = reader.getMark();
         return new TagToken(value, startMark, endMark);
     }
 
-    private Token scanBlockScalar(char style) {
+    private List<Token> scanBlockScalar(char style) {
         // See the specification for details.
         boolean folded;
         // Depending on the given style, we determine whether the scalar is
@@ -1640,7 +1661,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         reader.forward();
         Chomping chompi = scanBlockScalarIndicators(startMark);
         int increment = chompi.getIncrement();
-        scanBlockScalarIgnoredLine(startMark);
+        CommentToken commentToken = scanBlockScalarIgnoredLine(startMark);
 
         // Determine the indentation level and go to the first non-empty line.
         int minIndent = this.indent + 1;
@@ -1685,7 +1706,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 //
                 // This is the folding according to the specification:
                 if (folded && "\n".equals(lineBreak) && leadingNonSpace
-                        && " \t".indexOf(reader.peek()) == -1) {
+                    && " \t".indexOf(reader.peek()) == -1) {
                     if (breaks.length() == 0) {
                         chunks.append(" ");
                     }
@@ -1702,11 +1723,16 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (chompi.chompTailIsNotFalse()) {
             chunks.append(lineBreak);
         }
+        CommentToken blankLineCommentToken = null;
         if (chompi.chompTailIsTrue()) {
+            if (emitComments) {
+                blankLineCommentToken = new CommentToken(CommentType.BLANK_LINE, breaks, startMark, endMark);
+            }
             chunks.append(breaks);
         }
         // We are done.
-        return new ScalarToken(chunks.toString(), false, startMark, endMark, DumperOptions.ScalarStyle.createStyle(style));
+        ScalarToken scalarToken = new ScalarToken(chunks.toString(), false, startMark, endMark, DumperOptions.ScalarStyle.createStyle(style));
+        return makeTokenList(commentToken, scalarToken, blankLineCommentToken);
     }
 
     /**
@@ -1742,8 +1768,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 increment = Integer.parseInt(s);
                 if (increment == 0) {
                     throw new ScannerException("while scanning a block scalar", startMark,
-                            "expected indentation indicator in the range 1-9, but found 0",
-                            reader.getMark());
+                        "expected indentation indicator in the range 1-9, but found 0",
+                        reader.getMark());
                 }
                 reader.forward();
             }
@@ -1752,8 +1778,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             increment = Integer.parseInt(s);
             if (increment == 0) {
                 throw new ScannerException("while scanning a block scalar", startMark,
-                        "expected indentation indicator in the range 1-9, but found 0",
-                        reader.getMark());
+                    "expected indentation indicator in the range 1-9, but found 0",
+                    reader.getMark());
             }
             reader.forward();
             c = reader.peek();
@@ -1770,7 +1796,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (Constant.NULL_BL_LINEBR.hasNo(c)) {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a block scalar", startMark,
-                    "expected chomping or indentation indicators, but found " + s + "("
+                "expected chomping or indentation indicators, but found " + s + "("
                     + c + ")", reader.getMark());
         }
         return new Chomping(chomping, increment);
@@ -1780,7 +1806,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
      * Scan to the end of the line after a block scalar has been scanned; the
      * only things that are permitted at this time are comments and spaces.
      */
-    private String scanBlockScalarIgnoredLine(Mark startMark) {
+    private CommentToken scanBlockScalarIgnoredLine(Mark startMark) {
         // See the specification for details.
 
         // Forward past any number of trailing spaces
@@ -1789,16 +1815,9 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         }
 
         // If a comment occurs, scan to just before the end of line.
+        CommentToken commentToken = null;
         if (reader.peek() == '#') {
-            // Configurate start -- comments
-            reader.forward();
-
-            int ff = 0;
-            while (Constant.NULL_OR_LINEBR.hasNo(reader.peek())) {
-                ff++;
-            }
-            if (ff > 0) pushComment(ff);
-            // Configurate end
+            commentToken = scanComment(CommentType.IN_LINE);
         }
         // If the next character is not a null or line break, an error has
         // occurred.
@@ -1807,10 +1826,10 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (lineBreak.length() == 0 && c != '\0') {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a block scalar", startMark,
-                    "expected a comment or a line break, but found " + s + "("
+                "expected a comment or a line break, but found " + s + "("
                     + c + ")", reader.getMark());
         }
-        return lineBreak;
+        return commentToken;
     }
 
     /**
@@ -1959,9 +1978,9 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                     String hex = reader.prefix(length);
                     if (NOT_HEXA.matcher(hex).find()) {
                         throw new ScannerException("while scanning a double-quoted scalar",
-                                startMark, "expected escape sequence of " + length
-                                        + " hexadecimal numbers, but found: " + hex,
-                                reader.getMark());
+                            startMark, "expected escape sequence of " + length
+                            + " hexadecimal numbers, but found: " + hex,
+                            reader.getMark());
                     }
                     int decimal = Integer.parseInt(hex, 16);
                     String unicode = new String(Character.toChars(decimal));
@@ -1972,8 +1991,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 } else {
                     final String s = String.valueOf(Character.toChars(c));
                     throw new ScannerException("while scanning a double-quoted scalar", startMark,
-                            "found unknown escape character " + s + "(" + c + ")",
-                            reader.getMark());
+                        "found unknown escape character " + s + "(" + c + ")",
+                        reader.getMark());
                 }
             } else {
                 return chunks.toString();
@@ -1995,7 +2014,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (c == '\0') {
             // A flow scalar cannot end with an end-of-stream
             throw new ScannerException("while scanning a quoted scalar", startMark,
-                    "found unexpected end of stream", reader.getMark());
+                "found unexpected end of stream", reader.getMark());
         }
         // If we encounter a line break, scan it into our assembled string...
         String lineBreak = scanLineBreak();
@@ -2021,9 +2040,9 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             // separators.
             String prefix = reader.prefix(3);
             if (("---".equals(prefix) || "...".equals(prefix))
-                    && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
+                && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
                 throw new ScannerException("while scanning a quoted scalar", startMark,
-                        "found unexpected document separator", reader.getMark());
+                    "found unexpected document separator", reader.getMark());
             }
             // Scan past any number of spaces and tabs, ignoring them
             while (" \t".indexOf(reader.peek()) != -1) {
@@ -2061,14 +2080,14 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             int c;
             int length = 0;
             // A comment indicates the end of the scalar.
-            if (reader.peek() == '#') { // Configurate: comment captured in scanToNextToken
+            if (reader.peek() == '#') {
                 break;
             }
             while (true) {
                 c = reader.peek(length);
                 if (Constant.NULL_BL_T_LINEBR.has(c)
-                        || (c == ':' && Constant.NULL_BL_T_LINEBR.has(reader.peek(length + 1), flowLevel != 0 ? ",[]{}":""))
-                        || (this.flowLevel != 0 && ",?[]{}".indexOf(c) != -1)) {
+                    || (c == ':' && Constant.NULL_BL_T_LINEBR.has(reader.peek(length + 1), flowLevel != 0 ? ",[]{}":""))
+                    || (this.flowLevel != 0 && ",?[]{}".indexOf(c) != -1)) {
                     break;
                 }
                 length++;
@@ -2082,8 +2101,8 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             endMark = reader.getMark();
             spaces = scanPlainSpaces();
             // System.out.printf("spaces[%s]\n", spaces);
-            if (spaces.length() == 0 || reader.peek() == '#' // Configurate: comment captured in next token
-                    || (this.flowLevel == 0 && this.reader.getColumn() < indent)) {
+            if (spaces.length() == 0 || reader.peek() == '#'
+                || (this.flowLevel == 0 && this.reader.getColumn() < indent)) {
                 break;
             }
         }
@@ -2105,7 +2124,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             this.allowSimpleKey = true;
             String prefix = reader.prefix(3);
             if ("---".equals(prefix) || "...".equals(prefix)
-                    && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
+                && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
                 return "";
             }
             StringBuilder breaks = new StringBuilder();
@@ -2118,7 +2137,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                         breaks.append(lb);
                         prefix = reader.prefix(3);
                         if ("---".equals(prefix) || "...".equals(prefix)
-                                && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
+                            && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
                             return "";
                         }
                     } else {
@@ -2163,7 +2182,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         if (c != '!') {
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a " + name, startMark,
-                    "expected '!', but found " + s + "(" + (c) + ")", reader.getMark());
+                "expected '!', but found " + s + "(" + (c) + ")", reader.getMark());
         }
         // Look for the next '!' in the stream, stopping if we hit a
         // non-word-character. If the first character is a space, then the
@@ -2186,7 +2205,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 reader.forward(length);
                 final String s = String.valueOf(Character.toChars(c));
                 throw new ScannerException("while scanning a " + name, startMark,
-                        "expected '!', but found " + s + "(" + (c) + ")", reader.getMark());
+                    "expected '!', but found " + s + "(" + (c) + ")", reader.getMark());
             }
             length++;
         }
@@ -2237,7 +2256,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             // If no URI was found, an error has occurred.
             final String s = String.valueOf(Character.toChars(c));
             throw new ScannerException("while scanning a " + name, startMark,
-                    "expected URI, but found " + s + "(" + (c) + ")", reader.getMark());
+                "expected URI, but found " + s + "(" + (c) + ")", reader.getMark());
         }
         return chunks.toString();
     }
@@ -2277,10 +2296,10 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 int c2 = reader.peek(1);
                 final String s2 = String.valueOf(Character.toChars(c2));
                 throw new ScannerException("while scanning a " + name, startMark,
-                        "expected URI escape sequence of 2 hexadecimal numbers, but found "
-                                + s1 + "(" + c1 + ") and "
-                                + s2 + "(" + c2 + ")",
-                        reader.getMark());
+                    "expected URI escape sequence of 2 hexadecimal numbers, but found "
+                        + s1 + "(" + c1 + ") and "
+                        + s2 + "(" + c2 + ")",
+                    reader.getMark());
             }
             reader.forward(2);
         }
@@ -2289,7 +2308,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             return UriEncoder.decode(buff);
         } catch (CharacterCodingException e) {
             throw new ScannerException("while scanning a " + name, startMark,
-                    "expected URI in UTF-8: " + e.getMessage(), beginningMark);
+                "expected URI in UTF-8: " + e.getMessage(), beginningMark);
         }
     }
 
@@ -2324,6 +2343,20 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
             return String.valueOf(Character.toChars(c));
         }
         return "";
+    }
+
+    private List<Token> makeTokenList(Token... tokens) {
+        List<Token> tokenList = new ArrayList<>();
+        for (int ix = 0; ix < tokens.length; ix++) {
+            if (tokens[ix] == null) {
+                continue;
+            }
+            if (!emitComments && (tokens[ix] instanceof CommentToken)) {
+                continue;
+            }
+            tokenList.add(tokens[ix]);
+        }
+        return tokenList;
     }
 
     /**
