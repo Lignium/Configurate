@@ -186,7 +186,7 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         // 32-bit Unicode (Supplementary characters are supported)
         ESCAPE_CODES.put(Character.valueOf('U'), 8);
     }
-    final StreamReader reader; // Configurate: private -> package-private
+    private final StreamReader reader;
     // Had we reached the end of the stream?
     private boolean done = false;
 
@@ -362,6 +362,24 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                     // Is it the block entry indicator?
                 } else if (checkBlockEntry()) {
                     fetchBlockEntry();
+                    // Configurate start: fetch a comment token to place before the block entry token
+                    if (this.emitComments) {
+                        this.scanToNextToken();
+                        if (!this.tokens.isEmpty() && this.tokens.get(this.tokens.size() - 1) instanceof CommentToken) {
+                            // find the first non-comment token and swap it around
+                            int end = this.tokens.size() - 1;
+                            int start = 0;
+                            while (this.tokens.get(start) instanceof CommentToken) {
+                                start++;
+                            }
+                            if (start != end) {
+                                while (this.tokens.get(end) instanceof CommentToken) {
+                                    this.tokens.add(start, this.tokens.remove(end));
+                                }
+                            }
+                        }
+                    }
+                    // Configurate end
                     return;
                 }
                 break;
@@ -892,14 +910,14 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         SimpleKey key = this.possibleSimpleKeys.remove(this.flowLevel);
         if (key != null) {
             // Add KEY.
-            this.tokens.add(key.getTokenNumber() - this.tokensTaken, new KeyToken(key.getMark(),
+            this.tokens.add(Math.max(0, key.getTokenNumber() - this.tokensTaken), new KeyToken(key.getMark(), // Configurate: clamp idx to at least 0
                 key.getMark()));
 
             // If this key starts a new block mapping, we need to add
             // BLOCK-MAPPING-START.
             if (this.flowLevel == 0) {
                 if (addIndent(key.getColumn())) {
-                    this.tokens.add(key.getTokenNumber() - this.tokensTaken,
+                    this.tokens.add(Math.max(0, key.getTokenNumber() - this.tokensTaken), // Configurate: clamp index to at least 0
                         new BlockMappingStartToken(key.getMark(), key.getMark()));
                 }
             }
@@ -2108,6 +2126,47 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
         }
         return new ScalarToken(chunks.toString(), startMark, endMark, true);
     }
+    // Configurate start: Apply https://bitbucket.org/asomov/snakeyaml/pull-requests/14 ahead of upstream
+    // Helper for scanPlainSpaces method when comments are enabled.
+    // The ensures that blank lines and comments following a multi-line plain token are not swallowed up
+    private boolean atEndOfPlain() {
+        // peak ahead to find end of whitespaces and the column at which it occurs
+        int wsLength = 0;
+        int wsColumn = this.reader.getColumn();
+        {
+            int c;
+            while ((c = reader.peek(wsLength)) != '\0' && Constant.NULL_BL_T_LINEBR.has(c)) {
+                wsLength++;
+                if (!Constant.LINEBR.has(c) && (c != '\r' || reader.peek(wsLength + 1) != '\n') && c != 0xFEFF) {
+                    wsColumn++;
+                } else {
+                    wsColumn = 0;
+                }
+            }
+        }
+
+        // if we see, a comment or end of string or change decrease in indent, we are done
+        // Do not chomp end of lines and blanks, they will be handled by the main loop.
+        if (reader.peek(wsLength) == '#' || reader.peek(wsLength + 1) == '\0'
+            || this.flowLevel == 0 && wsColumn < this.indent) {
+            return true;
+        }
+
+        // if we see, after the space, a key-value followed by a ':', we are done
+        // Do not chomp end of lines and blanks, they will be handled by the main loop.
+        if (this.flowLevel == 0) {
+            int c;
+            for(int extra = 1; (c = reader.peek(wsLength + extra)) != 0 && !Constant.NULL_BL_T_LINEBR.has(c); extra++) {
+                if (c == ':' && Constant.NULL_BL_T_LINEBR.has(reader.peek(wsLength + extra + 1))) {
+                    return true;
+                }
+            }
+        }
+
+        // None of the above so safe to chomp the spaces.
+        return false;
+    }
+    // Configurate end
 
     /**
      * See the specification for details. SnakeYAML and libyaml allow tabs
@@ -2127,6 +2186,10 @@ final class ConfigurateScanner implements Scanner { // Configurate: rename + pac
                 && Constant.NULL_BL_T_LINEBR.has(reader.peek(3))) {
                 return "";
             }
+            // Configurate start: apply https://bitbucket.org/asomov/snakeyaml/pull-requests/14 ahead of upstream
+            if (this.emitComments && atEndOfPlain()) {
+                return "";
+            } // Configurate end
             StringBuilder breaks = new StringBuilder();
             while (true) {
                 if (reader.peek() == ' ') {

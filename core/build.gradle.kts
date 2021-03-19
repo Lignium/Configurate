@@ -1,5 +1,6 @@
 import de.thetaphi.forbiddenapis.gradle.CheckForbiddenApis
 import org.spongepowered.configurate.build.useAutoValue
+import kotlin.math.max
 
 plugins {
     jacoco

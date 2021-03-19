@@ -11,6 +11,8 @@ description = "YAML format loader for Configurate"
 tasks.withType(GroovyCompile::class).configureEach {
     // Toolchains need this... for some reason
     options.release.set(indra.javaVersions.target)
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
 }
 
 useAutoValue()

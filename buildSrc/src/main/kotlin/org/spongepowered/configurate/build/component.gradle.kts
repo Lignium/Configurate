@@ -25,6 +25,10 @@ dependencyLocking {
     lockFile.set(rootProject.layout.projectDirectory.file("gradle/dependencies/${project.path.replace(':', '-').substring(1)}.lock"))
 }
 
+configurations.matching { "ktlint" in it.name }.configureEach {
+    resolutionStrategy.deactivateDependencyLocking()
+}
+
 tasks.register("resolveAllForLocking") {
     description = "Update all dependency locks. Must be run with the `--write-locks` flag."
 
