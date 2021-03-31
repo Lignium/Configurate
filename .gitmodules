@@ -1,0 +1,3 @@
+[submodule "vendor/snakeyaml"]
+	path = vendor/snakeyaml
+	url = https://bitbucket.org/zml2008/snakeyaml.git
