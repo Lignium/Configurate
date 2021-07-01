@@ -13,6 +13,9 @@ buildSrc/*/bin/
 /extra/*/out/
 /extra/*/bin/
 
+# gitpatcher local data
+/vendor/snakeyaml/
+
 # IntelliJ project data
 .idea
 *.iml
