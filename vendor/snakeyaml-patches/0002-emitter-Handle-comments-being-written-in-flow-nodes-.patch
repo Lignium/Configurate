@@ -6,7 +6,7 @@ Subject: [PATCH] emitter: Handle comments being written in flow nodes, so at
 
 
 diff --git a/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java b/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
-index fa5fa82564e9b24d36ab59052e614b80dd570487..b2d846ca8663b482d0b5ed19594cb2b22f4b5957 100644
+index b9214ee513c3145bb084ddc23d8bfa78996c57a6..9b5268298518d3a5cf55a8763b7f5f537b511720 100644
 --- a/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
 +++ b/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
 @@ -547,7 +547,7 @@ public final class Emitter implements Emitable {
