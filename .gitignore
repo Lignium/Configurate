@@ -21,6 +21,10 @@ buildSrc/*/bin/
 *.iml
 *.ipr
 idea/
+/*/*/src/*/java/generated/
+/*/*/src/*/generated/
+/*/src/*/java/generated/
+/*/src/*/generated/
 
 # Mac stuff
 .DS_Store

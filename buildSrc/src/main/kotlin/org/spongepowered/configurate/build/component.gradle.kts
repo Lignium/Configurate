@@ -120,6 +120,7 @@ dependencies {
             attribute(Attribute.of("org.gradle.status", String::class.java), "release")
         }
     }
+    testImplementation("org.assertj:assertj-core:3.+")
 }
 
 configurations {

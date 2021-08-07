@@ -64,6 +64,7 @@ org.antlr:antlr4-runtime:4.7.2=pmd
 org.antlr:antlr4-runtime:4.9.1=checkstyle
 org.apache.commons:commons-lang3:3.8.1=pmd
 org.apiguardian:apiguardian-api:1.1.0=java15TestCompileClasspath,java15TestRuntimeClasspath,java16TestCompileClasspath,java16TestRuntimeClasspath,testCompileClasspath,testRuntimeClasspath
+org.assertj:assertj-core:3.20.2=testCompileClasspath,testRuntimeClasspath
 org.checkerframework:checker-qual:3.11.0=compileOnly,java15TestCompileClasspath,testCompileOnly
 org.checkerframework:checker-qual:3.12.0=java16TestCompileClasspath
 org.checkerframework:checker-qual:3.14.0=compileClasspath,testCompileClasspath
