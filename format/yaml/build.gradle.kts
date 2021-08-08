@@ -23,6 +23,7 @@ val shaded by configurations.registering {
 configurations {
     compileClasspath { extendsFrom(shaded.get()) }
     runtimeClasspath { extendsFrom(shaded.get()) }
+    testImplementation { extendsFrom(shaded.get()) }
 }
 
 useAutoValue()
