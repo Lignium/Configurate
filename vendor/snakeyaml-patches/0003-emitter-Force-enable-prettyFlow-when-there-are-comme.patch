@@ -8,7 +8,7 @@ sequences. It might be nice to capture the prettiness status of input
 data, but that seems extremely error-prone and probably not worth doing.
 
 diff --git a/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java b/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
-index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba6171077a577 100644
+index cad49156be009cd37eeb0bb0bd70248908ef1630..5df8a3be0034233cf9330fa752bae82591d66c30 100644
 --- a/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
 +++ b/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
 @@ -151,7 +151,14 @@ public final class Emitter implements Emitable {
@@ -36,24 +36,7 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
          this.allowUnicode = opts.isAllowUnicode();
          this.bestIndent = 2;
          if ((opts.getIndent() > MIN_INDENT) && (opts.getIndent() < MAX_INDENT)) {
-@@ -248,6 +255,16 @@ public final class Emitter implements Emitable {
-                 CommentType.IN_LINE);
-     }
- 
-+    // Configurate start - customizable prettyFlow
-+    public void prettyFlow(final boolean prettyFlow) {
-+        this.prettyFlow = prettyFlow;
-+    }
-+
-+    public boolean prettyFlow() {
-+        return this.prettyFlow;
-+    }
-+    // Configurate end
-+
-     public void emit(Event event) throws IOException {
-         this.events.add(event);
-         while (!needMoreEvents()) {
-@@ -499,6 +516,9 @@ public final class Emitter implements Emitable {
+@@ -499,6 +506,9 @@ public final class Emitter implements Emitable {
      private void expectFlowSequence() throws IOException {
          writeIndicator("[", true, true, false);
          flowLevel++;
@@ -63,7 +46,7 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
          increaseIndent(true, false);
          if (prettyFlow) {
              writeIndent();
-@@ -512,6 +532,11 @@ public final class Emitter implements Emitable {
+@@ -512,6 +522,11 @@ public final class Emitter implements Emitable {
                  indent = indents.pop();
                  flowLevel--;
                  writeIndicator("]", false, false, false);
@@ -75,7 +58,7 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
                  inlineCommentsCollector.collectEvents();
                  writeInlineComments();
                  state = states.pop();
-@@ -542,6 +567,11 @@ public final class Emitter implements Emitable {
+@@ -542,6 +557,11 @@ public final class Emitter implements Emitable {
                      writeIndent();
                  }
                  writeIndicator("]", false, false, false);
@@ -87,7 +70,7 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
                  inlineCommentsCollector.collectEvents();
                  writeInlineComments();
                  if (prettyFlow) {
-@@ -569,6 +599,9 @@ public final class Emitter implements Emitable {
+@@ -569,6 +589,9 @@ public final class Emitter implements Emitable {
      private void expectFlowMapping() throws IOException {
          writeIndicator("{", true, true, false);
          flowLevel++;
@@ -97,7 +80,7 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
          increaseIndent(true, false);
          if (prettyFlow) {
              writeIndent();
-@@ -584,6 +617,11 @@ public final class Emitter implements Emitable {
+@@ -584,6 +607,11 @@ public final class Emitter implements Emitable {
                  indent = indents.pop();
                  flowLevel--;
                  writeIndicator("}", false, false, false);
@@ -109,7 +92,7 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
                  inlineCommentsCollector.collectEvents();
                  writeInlineComments();
                  state = states.pop();
-@@ -616,6 +654,11 @@ public final class Emitter implements Emitable {
+@@ -616,6 +644,11 @@ public final class Emitter implements Emitable {
                      writeIndent();
                  }
                  writeIndicator("}", false, false, false);
@@ -121,11 +104,12 @@ index cad49156be009cd37eeb0bb0bd70248908ef1630..d00981e62d06f9d676908c0f586ba617
                  inlineCommentsCollector.collectEvents();
                  writeInlineComments();
                  state = states.pop();
-@@ -1480,6 +1523,10 @@ public final class Emitter implements Emitable {
+@@ -1480,6 +1513,11 @@ public final class Emitter implements Emitable {
          if(!blockCommentsCollector.isEmpty()) {
              writeIndent();
              writeCommentLines(blockCommentsCollector.consume());
 +            if (!prettyFlow && flowLevel > 0) {
++
 +                prettyFlow = true;
 +                requiredPrettyFlowLevel++;
 +            }

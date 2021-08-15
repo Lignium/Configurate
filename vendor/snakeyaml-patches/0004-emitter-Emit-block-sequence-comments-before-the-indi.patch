@@ -8,10 +8,10 @@ first element of the sequence. I don't think there's anything we can
 do about that though.... needs more thought i suppose
 
 diff --git a/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java b/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
-index d00981e62d06f9d676908c0f586ba6171077a577..75028b4a4a5cd3eb1be38d979c04c479b9323952 100644
+index 5df8a3be0034233cf9330fa752bae82591d66c30..457dfa07ec29a1d1fc0c781b99d9f8d192dfa130 100644
 --- a/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
 +++ b/src/main/java/org/yaml/snakeyaml/emitter/Emitter.java
-@@ -733,9 +733,12 @@ public final class Emitter implements Emitable {
+@@ -723,9 +723,12 @@ public final class Emitter implements Emitable {
              if (!this.first && event instanceof SequenceEndEvent) {
                  indent = indents.pop();
                  state = states.pop();
@@ -25,7 +25,7 @@ index d00981e62d06f9d676908c0f586ba6171077a577..75028b4a4a5cd3eb1be38d979c04c479
                  writeIndent();
                  if (!indentWithIndicator || this.first) {
                      writeWhitespace(indicatorIndent);
-@@ -744,17 +747,6 @@ public final class Emitter implements Emitable {
+@@ -734,17 +737,6 @@ public final class Emitter implements Emitable {
                  if (indentWithIndicator && this.first) {
                      indent += indicatorIndent;
                  }
