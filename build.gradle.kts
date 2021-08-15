@@ -39,7 +39,7 @@ idea {
             }
             this.extensions.configure(org.jetbrains.gradle.ext.CopyrightConfiguration::class) {
                 val configurateProfile = profiles.create("configurate") {
-                    notice = file("LICENSE_HEADER").readText(Charsets.UTF_8)
+                    notice = file("LICENSE_HEADER").readText(Charsets.UTF_8).trim()
                     keyword = "Copyright"
                 }
                 useDefault = configurateProfile.name
