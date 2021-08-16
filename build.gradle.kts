@@ -37,13 +37,6 @@ idea {
                 this.delegateBuildRunToGradle = false
                 this.testRunner = ActionDelegationConfig.TestRunner.PLATFORM
             }
-            this.extensions.configure(org.jetbrains.gradle.ext.CopyrightConfiguration::class) {
-                val configurateProfile = profiles.create("configurate") {
-                    notice = file("LICENSE_HEADER").readText(Charsets.UTF_8).trim()
-                    keyword = "Copyright"
-                }
-                useDefault = configurateProfile.name
-            }
         }
     }
 }
